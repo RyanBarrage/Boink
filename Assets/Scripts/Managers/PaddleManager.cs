@@ -1,19 +1,41 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using Fusion;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using static BallManager;
 
 public class PaddleManager : NetworkBehaviour
 {
     public static PaddleManager Instance;
 
-    public Dictionary<GameMode, GameObject> paddlePrefabMap = new();
+    [Header("Paddle Prefabs By GameMode")]
+    public List<BallPrefabEntry> paddlePrefabEntries;
+
+    public Dictionary<GameMode, NetworkPrefabRef> paddlePrefabMap = new();
     public Dictionary<int, PaddleControllerBase> playerPaddles = new();
+
+    [Serializable]
+    public struct PaddlePrefabEntry
+    {
+        public GameMode gameMode;
+        public NetworkPrefabRef prefab;
+    }
 
     public override void Spawned()
     {
         Instance = this;
+
+        InitializePrefabMap();
+    }
+
+    private void InitializePrefabMap()
+    {
+        foreach (var entry in paddlePrefabEntries)
+        {
+            paddlePrefabMap[entry.gameMode] = entry.prefab;
+        }
     }
 
     public void SpawnPaddleForPlayer(PlayerRef player, GameMode mode)
@@ -45,6 +67,27 @@ public class PaddleManager : NetworkBehaviour
         }
 
         return null;
+    }
+
+    public void ResetAllPaddles()
+    {
+        foreach (var kvp in playerPaddles)
+        {
+            if (kvp.Value != null)
+                Runner.Despawn(kvp.Value.Object);
+        }
+        playerPaddles.Clear();
+    }
+
+
+    public void UpdatePaddlesForMode(GameMode newMode)
+    {
+        ResetAllPaddles();
+
+        foreach (var player in Runner.ActivePlayers)
+        {
+            SpawnPaddleForPlayer(player, newMode);
+        }
     }
 
     public void UnassignPaddleForPlayer(int playerId)

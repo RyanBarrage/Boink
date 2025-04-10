@@ -11,10 +11,11 @@ public class GameManager : NetworkBehaviour
     public static GameManager Instance { get; private set; }
 
     [Networked] public GameMode CurrentGameMode { get; private set; }
-    [Networked] public GameState GameState { get; private set; }
+    [Networked] public GameState CurrentGameState { get; private set; }
 
     [SerializeField] private BoardManager boardManager;
     [SerializeField] private PowerUpManager powerUpManager;
+    [SerializeField] private BallManager ballManager;
     [SerializeField] private GameMode defaultGameMode = GameMode.AirHockey;
 
     private ScoreManager scoreManager;
@@ -29,8 +30,9 @@ public class GameManager : NetworkBehaviour
 
         if (Object.HasStateAuthority)
         {
+            CurrentGameState = GameState.Started;
             CurrentGameMode = defaultGameMode;
-            boardManager.InitializeBoard(CurrentGameMode);
+            StartGame(CurrentGameMode);
         }
     }
 
@@ -39,9 +41,23 @@ public class GameManager : NetworkBehaviour
         if (!Object.HasStateAuthority) return;
 
         CurrentGameMode = mode;
-        boardManager.InitializeBoard(mode);
+        CurrentGameState = GameState.Running;
         playerService.InitializePlayers();
+        PaddleManager.Instance.UpdatePaddlesForMode(CurrentGameMode);
+        boardManager.LoadBoardForMode(mode);
+        ballManager.InitializeBall(CurrentGameMode, ScoreManager.Instance);
+        
         RPC_SyncGameMode(mode);
+    }
+
+    public void OnModeChange(GameMode mode)
+    {
+        CurrentGameMode = mode;
+        //change board
+        //clear powerups
+        PaddleManager.Instance.UpdatePaddlesForMode(CurrentGameMode);
+        BallManager.Instance.UpdateBallsForMode(CurrentGameMode);
+
     }
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
@@ -57,33 +73,6 @@ public class GameManager : NetworkBehaviour
 
     [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
     private void RPC_UpdateScore(int p1, int p2) => scoreManager.SetScores(p1, p2);
-
-    public void ApplyPowerUp(string powerupID, int instigatorID, BallControllerBase triggeringBall = null)
-    {
-        PowerUpData powerup = powerUpManager.GetPowerUpByID(powerupID);
-        if (powerup == null) return;
-
-        switch (powerup.targetType)
-        {
-            case EffectTargetType.Global:
-                powerUpManager.ApplyPowerUpByID(powerup.id, triggeringBall);
-                break;
-
-            case EffectTargetType.Player:
-                powerUpManager.ApplyPowerUpToPlayers(powerup, instigatorID);
-                break;
-
-            case EffectTargetType.Ball:
-                powerUpManager.ApplyPowerUpToAllBalls(powerup);
-                break;
-        }
-    }
-
-
-    public void UpdatePowerups(float deltaTime)
-    {
-        powerUpManager.UpdatePowerups(deltaTime);
-    }
 
     public List<BallControllerBase> GetActiveBalls() => BallManager.Instance.GetActiveBalls(CurrentGameMode);
     public List<PlayerController> GetAllPlayers() => playerService.GetAllPlayers();

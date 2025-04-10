@@ -22,5 +22,5 @@ public class ModifyBallSpeedEffect : EffectData
         }
     }
 
-    public override void Update(GameMode mode, PowerUpData powerup, PowerUpContext context) { }
+    public override void UpdateEffect(GameMode mode, PowerUpData powerup, PowerUpContext context) { }
 }

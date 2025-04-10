@@ -4,12 +4,24 @@ using System.Collections.Generic;
 using Fusion;
 using Fusion.Sockets;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 // on a singleton object, not per player. add to NetworkRunnerGO
 public class PlayerInputProvider : NetworkBehaviour, INetworkRunnerCallbacks
 {
+    private NetworkRunner runner;
+
+    private void Start()
+    {
+        runner = GetComponent<NetworkRunner>();
+        runner.AddCallbacks(this);
+    }
+
     public void OnInput(NetworkRunner runner, NetworkInput input)
     {
+        if (SceneManager.GetActiveScene().name != "GameScene")
+            return;
+
         var result = new PlayerInput();
 
         //result.PlayerID = myPlayerId; // assign player ID properly from context
@@ -43,7 +55,4 @@ public class PlayerInputProvider : NetworkBehaviour, INetworkRunnerCallbacks
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
     public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
-
-
-
 }

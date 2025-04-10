@@ -5,22 +5,29 @@ using UnityEngine;
 // on the player prefab that gets spawned on the network
 public class PlayerController : NetworkBehaviour
 {
-    private int playerID = -1;
+    [Networked] public int PlayerID { get; private set; }
 
     public override void Spawned()
     {
-        playerID = Object.InputAuthority.PlayerId;
-
-        if (Object.HasInputAuthority)
+        if (Object.HasStateAuthority)
         {
-            Debug.Log($"[PlayerController] Spawned local player {playerID}");
+            //PlayerID = Object.InputAuthority.PlayerId;
+            PlayerID = 0;
         }
         else
         {
-            Debug.Log($"[PlayerController] Spawned remote player {playerID}");
+            PlayerID = 1;
         }
 
-        // Optional: attach camera or UI if this is the local player
+        if (Object.HasInputAuthority)
+        {
+            Debug.Log($"[PlayerController] Local player {PlayerID} spawned");
+            // Attach camera or local controls here
+        }
+        else
+        {
+            Debug.Log($"[PlayerController] Remote player {PlayerID} spawned");
+        }
     }
 
     public override void FixedUpdateNetwork()
@@ -33,10 +40,10 @@ public class PlayerController : NetworkBehaviour
 
     public override void Despawned(NetworkRunner runner, bool hasState)
     {
-        Debug.Log($"[PlayerController] Player {playerID} despawned");
+        Debug.Log($"[PlayerController] Player {PlayerID} despawned");
 
         // Optional: cleanup
-        PaddleManager.Instance?.UnassignPaddleForPlayer(playerID);
+        PaddleManager.Instance?.UnassignPaddleForPlayer(PlayerID);
     }
 
     public override void Render()
@@ -46,7 +53,7 @@ public class PlayerController : NetworkBehaviour
 
     public int GetPlayerID()
     {
-        return playerID;
+        return PlayerID;
     }
 }
 

@@ -1,21 +1,40 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Fusion;
 using UnityEngine;
+using static BallManager;
 
 public class PowerUpManager : NetworkBehaviour
 {
     public static PowerUpManager Instance;
 
     [SerializeField] private List<PowerUpData> allPowerUps;
+    [Header("Powerup Prefabs By GameMode")]
+    public List<PowerupPrefabEntry> powerupPrefabEntries;
+
+    [SerializeField] private float spawnInterval = 10f;
+    [SerializeField] private int maxPowerups = 5;
+    [SerializeField] private float spawnRadius = 1f;
+    [SerializeField] private float minimumSpawnDistance = 1f;
 
     private readonly Dictionary<string, PowerUpData> powerupLookup = new();
+    private Dictionary<GameMode, NetworkPrefabRef> prefabMap = new();
+    private Dictionary<GameMode, List<PowerUpData>> modePowerups = new();
     private readonly List<ActivePowerUp> activeGlobalPowerups = new();
     private readonly Dictionary<int, List<ActivePowerUp>> activePlayerPowerups = new();
     private readonly Dictionary<BallControllerBase, List<ActivePowerUp>> activeBallPowerups = new();
 
+    private float timeSinceLastSpawn;
+    private int powerupBoxCount = 0;
 
+    [Serializable]
+    public struct PowerupPrefabEntry
+    {
+        public GameMode gameMode;
+        public NetworkPrefabRef prefab;
+    }
 
     private void Awake()
     {
@@ -28,15 +47,130 @@ public class PowerUpManager : NetworkBehaviour
         foreach (PowerUpData pu in allPowerUps)
         {
             if (!string.IsNullOrWhiteSpace(pu.id))
+            {
                 powerupLookup[pu.id] = pu;
+                foreach (GameMode mode in System.Enum.GetValues(typeof(GameMode)))
+                {
+                    if (pu.gameModes.Contains(mode))
+                        modePowerups[mode].Add(pu);
+                }
+            }
+                
+        }
+        InitializePrefabMap();
+    }
+
+    private void InitializePrefabMap()
+    {
+        foreach (var entry in powerupPrefabEntries)
+        {
+            prefabMap[entry.gameMode] = entry.prefab;
         }
     }
 
-    public PowerUpData GetPowerUpByID(string id)
+    public PowerUpData GetPowerUpByID(string id) => powerupLookup.GetValueOrDefault(id);
+
+    public PowerUpData GetRandomPowerup(GameMode mode)
     {
-        powerupLookup.TryGetValue(id, out PowerUpData powerup);
-        return powerup;
+        if (!modePowerups.TryGetValue(mode, out List<PowerUpData> powerups) || powerups.Count == 0)
+        {
+            Debug.LogWarning($"No powerups available for mode {mode}");
+            return null;
+        }
+
+        float totalWeight = powerups.Sum(p => p.spawnChance);
+        float randomValue = UnityEngine.Random.Range(0f, totalWeight);
+        float cumulative = 0;
+
+        foreach (PowerUpData powerup in powerups)
+        {
+            cumulative += powerup.spawnChance;
+            if (randomValue <= cumulative)
+                return powerup;
+        }
+
+        return null;
     }
+
+    private void TrySpawnPowerUp()
+    {
+        Vector3 spawnPosition = GetRandomSpawnPosition();
+
+        if (IsSpawnPositionValid(spawnPosition))
+        {
+            PowerUpData powerup = GetRandomPowerup(GameManager.Instance.CurrentGameMode);
+            if (powerup != null)
+            {
+                SpawnPowerup(GameManager.Instance.CurrentGameMode, spawnPosition, powerup);
+            }
+        }
+        else
+        {
+            TrySpawnPowerUp(); // Retry
+        }
+    }
+
+    public void SpawnPowerup(GameMode mode, Vector3 position, PowerUpData powerup)
+    {
+        if (Runner.IsServer) // Ensure this only happens on the host
+        {
+            NetworkObject powerUpObject = Runner.Spawn(prefabMap[mode], position); // Network-spawned object
+            PowerupBox powerUpBox = powerUpObject.GetComponent<PowerupBox>();
+
+            // Set the PowerupID on the PowerupBox component
+            powerUpBox.PowerupID = powerup.id;
+
+            // Increment the power-up box count on the host
+            IncrementPowerupBoxCount();
+        }
+    }
+
+    private bool IsSpawnPositionValid(Vector3 spawnPosition)
+    {
+        Collider[] colliders = Physics.OverlapSphere(spawnPosition, spawnRadius);
+
+        foreach (Collider c in colliders)
+        {
+            if (c.bounds.Contains(spawnPosition)) return false;
+            if (Vector3.Distance(spawnPosition, c.ClosestPoint(spawnPosition)) < minimumSpawnDistance) return false;
+
+        }
+
+        foreach (RectTransform rect in BoardManager.Instance.GetScoreTransforms())
+        {
+            if (RectTransformUtility.RectangleContainsScreenPoint(rect, Camera.main.WorldToScreenPoint(spawnPosition)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public void IncrementPowerupBoxCount() => powerupBoxCount++;
+    public void DecrementPowerupBoxCount() => powerupBoxCount--;
+
+    private Vector3 GetRandomSpawnPosition()
+    {
+        return BoardManager.Instance.GetRandomSpawnPoint();
+    }
+
+    /*private Vector3 GetRandomSpawnPosition()
+    {
+        // Create a spawn position on the spawn plane (assumes Y is constant)
+        Vector3 spawnPosition = BoardManager.Instance.GetRandomSpawnPoint();
+
+        // Ensure the spawn position is valid
+        if (IsSpawnPositionValid(spawnPosition))
+        {
+            return spawnPosition;
+        }
+        else
+        {
+            // If invalid, try again recursively (to find a valid spawn)
+            return GetRandomSpawnPosition();
+        }
+    }*/
 
     private List<PlayerController> GetFilteredPlayers(PowerUpData powerup, PowerUpContext context)
     {
@@ -50,6 +184,27 @@ public class PowerUpManager : NetworkBehaviour
             PlayerTarget.Both => new List<PlayerController>(allPlayers),
             _ => new List<PlayerController>()
         };
+    }
+
+    public void ApplyPowerUp(string powerupID, int instigatorID, BallControllerBase triggeringBall = null)
+    {
+        PowerUpData powerup = GetPowerUpByID(powerupID);
+        if (powerup == null) return;
+
+        switch (powerup.targetType)
+        {
+            case EffectTargetType.Global:
+                ApplyPowerUpByID(powerup.id, triggeringBall);
+                break;
+
+            case EffectTargetType.Player:
+                ApplyPowerUpToPlayers(powerup, instigatorID);
+                break;
+
+            case EffectTargetType.Ball:
+                ApplyPowerUpToAllBalls(powerup);
+                break;
+        }
     }
 
     public void ApplyPowerUp(PowerUpData powerup, PowerUpContext context)
@@ -128,8 +283,26 @@ public class PowerUpManager : NetworkBehaviour
         activeBallPowerups[ball].Add(active);
     }
 
+    private void Update()
+    {
+        if (!IsGameRunning() || !Runner.IsServer) return;
+
+        timeSinceLastSpawn += Time.deltaTime;
+
+        if (timeSinceLastSpawn >= spawnInterval && powerupBoxCount < maxPowerups)
+        {
+            timeSinceLastSpawn = 0f;
+            TrySpawnPowerUp();
+        }
+
+        UpdatePowerups(Time.deltaTime); // Already exists
+    }
+
     public void UpdatePowerups(float deltaTime)
     {
+        if (!Runner.IsServer)
+            return;
+
         // Update global power-ups
         UpdateActivePowerUps(activeGlobalPowerups, deltaTime);
 
@@ -143,6 +316,16 @@ public class PowerUpManager : NetworkBehaviour
         foreach (List<ActivePowerUp> activePowerups in activeBallPowerups.Values)
         {
             UpdateActivePowerUps(activePowerups, deltaTime);
+        }
+
+        int totalActivePowerups = activeGlobalPowerups.Count +
+                                  activePlayerPowerups.Values.Sum(list => list.Count) +
+                                  activeBallPowerups.Values.Sum(list => list.Count);
+
+        if (totalActivePowerups >= maxPowerups)
+        {
+            // Trigger the mode switch or any other logic related to this condition
+            GameManager.Instance.OnModeChange((GameMode)UnityEngine.Random.Range(0, System.Enum.GetValues(typeof(GameMode)).Length)); // Call your custom logic to handle mode switching
         }
     }
 
@@ -198,17 +381,9 @@ public class PowerUpManager : NetworkBehaviour
 
     public IReadOnlyList<ActivePowerUp> GetActiveGlobalPowerUps() => activeGlobalPowerups;
 
-    private void Update()
-    {
-        if (IsGameRunning()) // Check if the game is actively running.
-        {
-            UpdatePowerups(Time.deltaTime); // Call the UpdatePowerups method.
-        }
-    }
-
     private bool IsGameRunning()
     {
         // Implement logic to determine if the game is running.
-        return GameManager.Instance.GameState == GameState.Running; // Placeholder, replace with actual game state check.
+        return GameManager.Instance.CurrentGameState == GameState.Running; // Placeholder, replace with actual game state check.
     }
 }

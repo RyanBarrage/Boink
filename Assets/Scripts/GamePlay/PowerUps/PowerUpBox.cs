@@ -15,8 +15,9 @@ public class PowerupBox : NetworkBehaviour
             BallControllerBase ball = other.GetComponent<BallControllerBase>();
             if (ball == null) return;
 
-            PowerUpManager manager = FindObjectOfType<PowerUpManager>();
-            manager?.ApplyPowerUpByID(PowerupID, ball);
+            //PowerUpManager manager = FindObjectOfType<PowerUpManager>();
+            //manager?.ApplyPowerUpByID(PowerupID, ball);
+            PowerUpManager.Instance.ApplyPowerUp(PowerupID, ball.GetLastTouchPlayerID(), ball);
 
             Runner.Despawn(Object);
         }

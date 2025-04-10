@@ -97,7 +97,7 @@ public abstract class BallControllerBase : NetworkBehaviour, IBallController
         rb.Rigidbody.AddForce(randomDirection * initialForce, ForceMode.Impulse);
     }
 
-    public void ModifyVelocity(float multiplier)
+    public virtual void ModifyVelocity(float multiplier)
     {
         rb.Rigidbody.velocity *= multiplier;
     }

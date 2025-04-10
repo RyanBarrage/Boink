@@ -8,7 +8,7 @@ public abstract class EffectData : ScriptableObject
 {
     public abstract void Apply(GameMode mode, PowerUpData powerup, PowerUpContext context);
     public abstract void Stop(GameMode mode, PowerUpData powerup, PowerUpContext context);
-    public abstract void Update(GameMode mode, PowerUpData powerup, PowerUpContext context);
+    public abstract void UpdateEffect(GameMode mode, PowerUpData powerup, PowerUpContext context);
 
     protected IEnumerable<PlayerController> FilterPlayers(PowerUpData powerup, PowerUpContext context)
     {

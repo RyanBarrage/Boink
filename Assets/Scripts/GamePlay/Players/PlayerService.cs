@@ -9,17 +9,21 @@ public class PlayerService
 
     public void InitializePlayers()
     {
-        foreach (PlayerController player in Object.FindObjectsOfType<PlayerController>())
+        players.Clear();
+
+        foreach (var pc in Object.FindObjectsOfType<PlayerController>())
         {
-            int id = player.GetPlayerID();
+            int id = pc.GetPlayerID();
             if (!players.ContainsKey(id))
-                players.Add(id, player);
+            {
+                players.Add(id, pc);
+                Debug.Log($"[PlayerService] Registered player {id}");
+            }
         }
     }
 
     public PlayerController GetPlayer(int id) =>
-        players.TryGetValue(id, out PlayerController p) ? p : null;
+        players.TryGetValue(id, out var player) ? player : null;
 
     public List<PlayerController> GetAllPlayers() => players.Values.ToList();
-
 }

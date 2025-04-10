@@ -64,7 +64,7 @@ public class PowerUpData : ScriptableObject
     {
         foreach (EffectData effect in effects)
         {
-            effect.Update(context.gameManager.CurrentGameMode, this, context);
+            effect.UpdateEffect(context.gameManager.CurrentGameMode, this, context);
         }
     }
 }

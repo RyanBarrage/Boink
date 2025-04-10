@@ -15,6 +15,10 @@ public class BallManager : NetworkBehaviour
     private Dictionary<GameMode, NetworkPrefabRef> prefabMap = new();
     private Dictionary<GameMode, List<NetworkObject>> activeBalls = new();
 
+    // network-synced active balls, one gamemode only
+    [Networked, Capacity(16)] // adjust capacity as needed
+    private NetworkLinkedList<NetworkObject> SyncedBalls => default;
+
     private NetworkRunner runner;
 
     [Serializable]
@@ -28,13 +32,18 @@ public class BallManager : NetworkBehaviour
     {
         if (Instance != null && Instance != this)
         {
-            Destroy(gameObject);
+            Runner.Despawn(Object);
             return;
         }
 
         Instance = this;
         runner = Runner;
 
+        InitializePrefabMap();
+    }
+
+    private void InitializePrefabMap()
+    {
         foreach (var entry in ballPrefabEntries)
         {
             prefabMap[entry.gameMode] = entry.prefab;
@@ -76,6 +85,7 @@ public class BallManager : NetworkBehaviour
 
         // Enable only for current game mode
         ball.gameObject.SetActive(mode == GameManager.Instance.CurrentGameMode);
+        SyncedBalls.Add(ball);
     }
 
     public void SpawnBalls(GameMode mode, int count, IScoreService scoreService)
@@ -106,6 +116,7 @@ public class BallManager : NetworkBehaviour
 
             // Optional: Activate only if it's the current mode
             ball.gameObject.SetActive(mode == GameManager.Instance.CurrentGameMode);
+            SyncedBalls.Add(ball);
         }
     }
 
@@ -132,7 +143,11 @@ public class BallManager : NetworkBehaviour
         for (int i = 1; i < balls.Count; i++)
         {
             if (runner.IsServer)
+            {
                 runner.Despawn(balls[i]);
+                SyncedBalls.Remove(balls[i]);
+            }
+                
         }
 
         if (balls.Count > 1)
@@ -149,11 +164,63 @@ public class BallManager : NetworkBehaviour
         }
     }
 
+    public void ResetAllBalls()
+    {
+        foreach (var kvp in activeBalls)
+        {
+            foreach (var ball in kvp.Value)
+            {
+                if (runner.IsServer && ball != null)
+                    runner.Despawn(ball);
+            }
+            kvp.Value.Clear();
+        }
+        SyncedBalls.Clear();
+    }
+
+    public void EnsureSingleBall(GameMode mode, IScoreService scoreService)
+    {
+        if (activeBalls.TryGetValue(mode, out var balls))
+        {
+            foreach (var ball in balls.Skip(1))
+            {
+                if (runner.IsServer)
+                {
+                    runner.Despawn(ball);
+                    SyncedBalls.Remove(ball);
+                }
+                    
+            }
+            balls.RemoveRange(1, balls.Count - 1);
+        }
+        else
+        {
+            activeBalls[mode] = new List<NetworkObject>();
+        }
+
+        if (activeBalls[mode].Count == 0)
+        {
+            SpawnBall(mode, scoreService);
+        }
+        else
+        {
+            var ball = activeBalls[mode][0];
+            ball.gameObject.SetActive(true);
+            ball.GetComponent<IBallController>().ResetBall();
+        }
+    }
+
+    public void UpdateBallsForMode(GameMode newMode)
+    {
+        ResetAllBalls();
+        InitializeBall(newMode, ScoreManager.Instance);
+    }
+
     /*public List<NetworkObject> GetActiveBalls(GameMode mode)
     {
         return activeBalls.TryGetValue(mode, out var balls) ? balls : new List<NetworkObject>();
     }*/
-public List<BallControllerBase> GetActiveBalls(GameMode mode)
+    public List<BallControllerBase> GetActiveBalls(GameMode mode)
     {
         // Try to get the list of NetworkObjects for the given game mode.
         if (activeBalls.TryGetValue(mode, out var balls))
